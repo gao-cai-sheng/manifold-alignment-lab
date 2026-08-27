@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>流形对齐实验室 · 七步看懂无监督词典归纳</title>
+<style>
+:root{
+  --bg:#070b12; --panel:rgba(12,18,29,.92); --line:#1a2436; --line2:#26344b;
+  --txt:#e6edf6; --dim:#93a3b8; --dim2:#5f7086;
+  --A:#f0abfc; --B:#67e8f9; --ok:#34d399; --bad:#fb7185; --warn:#fbbf24; --acc:#a78bfa;
+  --mono:"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--txt);overflow:hidden;display:flex;flex-direction:column;
+  font:13px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif;
+  -webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+::-webkit-scrollbar{width:7px;height:7px}::-webkit-scrollbar-thumb{background:#26344b;border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+
+header{height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;border-bottom:1px solid var(--line);background:#0a0f19}
+header h1{font-size:13px;font-weight:600}
+header .sub{font-size:11px;color:var(--dim2);margin-top:1px}
+.lgd{display:flex;gap:16px;align-items:center;font-size:11px}
+.lgd .grp{display:flex;align-items:center;gap:9px}
+.lgd .cap{font-size:9.5px;color:var(--dim2);letter-spacing:.3px}
+.lgd .it{display:flex;align-items:center;gap:5px;color:var(--dim);white-space:nowrap}
+.lgd .vsep{width:1px;height:22px;background:var(--line2)}
+.sw{width:11px;height:11px;border-radius:50%;flex:none}
+.sw.f{background:#cbd5e1}                       /* 实心＝语言 A，用中性色，避免和簇色抢意义 */
+.sw.h{border:2px solid #cbd5e1}                 /* 空心＝语言 B */
+.sw.c{width:9px;height:9px}
+
+main{flex:1;display:flex;min-height:0}
+#stage{flex:1;position:relative;min-width:0;cursor:grab;background:
+  radial-gradient(ellipse 70% 55% at 50% 45%,#0d1524 0%,#070b12 72%)}
+#stage:active{cursor:grabbing}
+canvas{display:block;width:100%;height:100%}
+
+.float{position:absolute;background:var(--panel);border:1px solid var(--line2);border-radius:9px;
+  backdrop-filter:blur(14px);box-shadow:0 10px 40px #0009}
+#hud{top:12px;left:12px;display:flex;overflow:hidden;align-items:stretch}
+#hud .m{padding:9px 14px;border-right:1px solid var(--line)}
+#hud .m:last-child{border-right:0}
+#hud .k{font-size:10px;color:var(--dim2);display:block;white-space:nowrap}
+#hud .v{font-size:17px;font-weight:600;font-family:var(--mono);display:block;margin-top:1px}
+#hud .n{font-size:9.5px;color:var(--dim2);display:block;margin-top:1px}
+
+#narr{bottom:74px;left:12px;right:12px;padding:12px 16px;display:flex;gap:14px;align-items:flex-start}
+#narr .num{font:600 26px/1 var(--mono);color:var(--acc);opacity:.55;flex:none;width:34px}
+#narr h3{font-size:13.5px;font-weight:600;margin-bottom:3px}
+#narr p{font-size:12px;color:var(--dim);line-height:1.65}
+#narr code{font-family:var(--mono);font-size:11.5px;background:#141d2e;padding:1px 5px;
+  border-radius:3px;color:#c4b5fd}
+
+#bar{bottom:12px;left:12px;right:12px;padding:7px 10px;display:flex;align-items:center;gap:8px}
+.steps{display:flex;gap:3px;flex:1}
+.steps b{flex:1;height:4px;border-radius:2px;background:#1e293b;transition:.25s;cursor:pointer}
+.steps b.done{background:#4c1d95} .steps b.cur{background:var(--acc)}
+button{font:inherit;font-size:11.5px;padding:6px 12px;border-radius:6px;cursor:pointer;
+  background:#141d2e;color:var(--dim);border:1px solid var(--line2);transition:.13s;white-space:nowrap}
+button:hover:not(:disabled){background:#1e2b42;color:var(--txt)}
+button:disabled{opacity:.32;cursor:default}
+button.pri{background:#3b2a6b;color:#ddd6fe;border-color:#6d4aca}
+button.on{background:#0e3f4d;color:#a5f3fc;border-color:#0e7490}
+
+aside{width:344px;flex:none;border-left:1px solid var(--line);background:#080d16;overflow-y:auto}
+.sec{padding:13px 15px;border-bottom:1px solid var(--line)}
+.sec h2{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim2);
+  font-weight:600;margin-bottom:10px}
+.ctl{margin-bottom:13px}
+.ctl:last-child{margin-bottom:0}
+.ctl .lab{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:5px}
+.ctl .lab b{font-family:var(--mono);color:var(--acc);font-weight:600}
+.ctl .hint{font-size:10.5px;color:var(--dim2);margin-top:4px;line-height:1.5}
+input[type=range]{width:100%;accent-color:#a78bfa;height:4px}
+
+.mat{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;font-family:var(--mono);font-size:10.5px}
+.mat i{background:#111b2b;padding:5px 2px;text-align:center;border-radius:3px;font-style:normal}
+.mat i.p{color:#86efac} .mat i.n{color:#fca5a5} .mat i.z{color:#475569}
+.mrow{display:flex;gap:11px;align-items:center;margin-bottom:9px}
+.mrow>div{flex:1}
+.mrow>.arw{flex:none;color:var(--dim2);font-size:18px}
+.mlab{font-size:10px;color:var(--dim2);margin-bottom:4px}
+
+.kv{display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0}
+.kv span{color:var(--dim2)} .kv b{font-family:var(--mono)}
+.note{font-size:11px;color:var(--dim2);line-height:1.65}
+.note b{color:var(--dim)}
+.note code{font-family:var(--mono);font-size:10.5px;background:#111b2b;padding:1px 4px;border-radius:3px;color:#a5b4fc}
+ul.t{margin:6px 0 0 15px}ul.t li{margin-bottom:5px}
+.box{border-radius:6px;padding:9px 11px;font-size:11px;line-height:1.65}
+.box.y{background:#1d1608;border:1px solid #57430f;color:#fcd9a0}
+.box.y b{color:#fbbf24}
+.box.b{background:#0b1c2b;border:1px solid #164e63;color:#a5d8ea}
+.box.b b{color:#67e8f9}
+table{width:100%;border-collapse:collapse;font-size:11px}
+td{padding:3px 4px;border-bottom:1px solid #101a29}
+td:last-child{text-align:right;font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>流形对齐实验室 · 七步看懂「无监督词典归纳」</h1>
+    <div class="sub">算法是真的：正交 Procrustes / SVD / 互为最近邻自学习 / CSLS，全部在本页运行</div>
+  </div>
+  <div class="lgd">
+    <div>
+      <div class="cap">填充 ＝ 哪种语言</div>
+      <div class="grp" style="margin-top:3px">
+        <span class="it"><i class="sw f"></i>实心：语言 A（待破译·源）</span>
+        <span class="it"><i class="sw h"></i>空心：语言 B（已知·目标）</span>
+      </div>
+    </div>
+    <div class="vsep"></div>
+    <div>
+      <div class="cap">颜色 ＝ 属于哪个语义簇</div>
+      <div class="grp" id="clusterLgd" style="margin-top:3px;gap:11px"></div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div class="float" id="hud"></div>
+    <div class="float" id="narr"></div>
+    <div class="float" id="bar">
+      <button id="prev">← 上一步</button>
+      <button id="play" class="pri">▶ 自动播放</button>
+      <button id="next">下一步 →</button>
+      <div class="steps" id="steps"></div>
+      <button id="rst">重置视角</button>
+    </div>
+  </div>
+
+  <aside>
+    <div class="sec">
+      <h2>核心矩阵（实时计算）</h2>
+      <div class="mrow">
+        <div><div class="mlab">M = XᵀY　互协方差</div><div class="mat" id="matM"></div></div>
+        <div class="arw">→</div>
+        <div><div class="mlab">W = VUᵀ　最优正交映射</div><div class="mat" id="matW"></div></div>
+      </div>
+      <div class="kv"><span>奇异值 σ₁ σ₂ σ₃</span><b id="sv" style="color:var(--acc)">—</b></div>
+      <div class="kv"><span>det(W)　应恒等于 1</span><b id="dw">—</b></div>
+      <div class="note" style="margin-top:8px">
+        W 有<b>闭式解</b>，不需要梯度下降：对 M 做 SVD，扔掉奇异值 Σ，只留 U 和 V。这是整个方法的心脏。
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>把它弄坏（这才是理解）</h2>
+      <div class="ctl">
+        <div class="lab"><span>各向异性扭曲 λ</span><b id="vLam">0.00</b></div>
+        <input type="range" id="sLam" min="0" max="100" value="0" step="2">
+        <div class="hint">把 B 的空间沿一个轴拉长成椭球，<b style="color:var(--warn)">破坏等距假设</b>。往右拉，看 P@1 怎么崩——正交映射修不了拉伸。</div>
+      </div>
+      <div class="ctl">
+        <div class="lab"><span>训练噪声 σ</span><b id="vNoi">0.04</b></div>
+        <input type="range" id="sNoi" min="0" max="40" value="4">
+        <div class="hint">模拟语料不足导致的向量抖动。死语言的真正瓶颈就在这里。</div>
+      </div>
+      <div class="ctl">
+        <div class="lab"><span>种子词典 k</span><b id="vSeed">4</b></div>
+        <input type="range" id="sSeed" min="0" max="40" value="4">
+        <div class="hint">已知的对应词对数。<b>拉到 0</b> 就是完全无监督——此时靠主轴粗对齐起步，再由自学习长出词典。</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>自学习迭代记录</h2>
+      <div id="chart"></div>
+      <table id="iterTbl"></table>
+      <div class="note" style="margin-top:8px">
+        每轮：<code>求 W</code> → <code>映射</code> → <code>取互为最近邻的点对</code> → <code>当作新词典</code> → 重来。
+        词典自己在长大，这就是「无监督」的含义。
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>参照：真实系统的成绩</h2>
+      <table>
+        <tr><td>MUSE 无监督　西→英 P@1</td><td style="color:var(--ok)">83.3%</td></tr>
+        <tr><td>MUSE 无监督　英→西 P@1</td><td style="color:var(--ok)">81.7%</td></tr>
+        <tr><td>MUSE 无监督　英→中 P@1</td><td style="color:var(--bad)">32.5%</td></tr>
+        <tr><td>线形文字 B → 希腊语　同源词</td><td style="color:var(--warn)">67.3%</td></tr>
+        <tr><td>乌加里特语 → 希伯来语　字母</td><td style="color:var(--ok)">29 / 30</td></tr>
+      </table>
+      <div class="note" style="margin-top:8px">
+        注意<b style="color:var(--bad)">英→中掉到 32.5%</b>。同一套算法、同样充足的语料，差别只在两个空间的形状不够像。<b>这正是 λ 滑块在演示的事。</b>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>这个页面哪部分是真的</h2>
+      <div class="box b">
+        <b>算法 100% 真实。</b>Procrustes 闭式解、3×3 SVD（用 Jacobi 特征分解实现）、互为最近邻筛选、CSLS 邻域校正、P@1 评测——都是页面里现算的，你动滑块它就重跑。打开控制台能看到零噪声自检结果。
+      </div>
+      <div class="box y" style="margin-top:8px">
+        <b>数据是受控生成的。</b>40 个概念先在球面上构造出一个「真实语义流形」，再生成两份带独立噪声、独立随机旋转的副本，当作两种语言。<br><br>
+        这是<b>故意的</b>：真实词向量是 300 维，你看不见；而学算法必须亲眼看到旋转。受控数据还有个好处——<b>有标准答案</b>，每个点该配哪个点是已知的，所以 P@1 是真分数，不是估计。
+      </div>
+      <div class="box y" style="margin-top:8px">
+        <b>受控数据也有它演示不了的东西。</b>最典型的就是 <b>hubness</b>：它来自真实语料的词频分布，随机撒的点造不出来。所以本页第 7 步里 CSLS 是<b>负增益</b>——这个负数是实测的，我没有为了好看去调参把它抹平。想看 CSLS 发挥作用，得拿真的 fastText 向量跑。
+      </div>
+    </div>
+
+    <div class="sec" style="border-bottom:0">
+      <h2>要点与出处</h2>
+      <div class="note">
+        <ul class="t">
+          <li><b>Mikolov 2013</b>　发现两种语言的词向量空间之间存在近似<b>线性</b>映射。</li>
+          <li><b>Xing 2015</b>　把映射约束成<b>正交</b>矩阵，效果反而更好——正交变换保距离，不破坏原空间结构。</li>
+          <li><b>Artetxe 2018</b>　自学习：很小的种子词典也能自举成大词典。</li>
+          <li><b>Conneau &amp; Lample 2018（MUSE）</b>　对抗训练做初始化 + CSLS 解决枢纽问题，做到零种子。</li>
+          <li><b>Søgaard 2018</b>　泼冷水：等距假设在语系差距大、语料领域不同时会失效。λ 滑块演示的就是这个。</li>
+          <li><b>Luo, Cao &amp; Barzilay 2019</b>　把这套东西真正用在失传文字上：线形文字 B → 希腊语。</li>
+        </ul>
+        <div style="margin-top:9px;color:var(--dim2)">本文件零外部依赖，断网可用。拖拽旋转视角，滚轮缩放，鼠标悬停看词。</div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+/*═══════════════════════════════════════════════════════════════
+  0 · 工具：确定性随机 / 线性代数
+═══════════════════════════════════════════════════════════════*/
+function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;
+  let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;
+  return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(r){let u=0,v=0;while(!u)u=r();while(!v)v=r();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+const norm=v=>{const n=Math.hypot(v[0],v[1],v[2])||1;return[v[0]/n,v[1]/n,v[2]/n];};
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const mul3=(A,B)=>[0,1,2].map(i=>[0,1,2].map(j=>A[i][0]*B[0][j]+A[i][1]*B[1][j]+A[i][2]*B[2][j]));
+const tr3=A=>[0,1,2].map(i=>[0,1,2].map(j=>A[j][i]));
+const det3=A=>A[0][0]*(A[1][1]*A[2][2]-A[1][2]*A[2][1])-A[0][1]*(A[1][0]*A[2][2]-A[1][2]*A[2][0])+A[0][2]*(A[1][0]*A[2][1]-A[1][1]*A[2][0]);
+const mv=(A,v)=>[0,1,2].map(a=>A[a][0]*v[0]+A[a][1]*v[1]+A[a][2]*v[2]);
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+
+function jacobi(Min,n){                                  // 对称阵特征分解
+  const A=Min.map(r=>Array.from(r));
+  const V=Array.from({length:n},(_,i)=>Array.from({length:n},(_,j)=>i===j?1:0));
+  for(let s=0;s<100;s++){
+    let off=0;for(let i=0;i<n;i++)for(let j=i+1;j<n;j++)off+=A[i][j]*A[i][j];
+    if(off<1e-18)break;
+    for(let p=0;p<n-1;p++)for(let q=p+1;q<n;q++){
+      if(Math.abs(A[p][q])<1e-19)continue;
+      const th=(A[q][q]-A[p][p])/(2*A[p][q]), sg=th>=0?1:-1;
+      const t=sg/(Math.abs(th)+Math.sqrt(th*th+1)), c=1/Math.sqrt(t*t+1), sn=t*c;
+      for(let k=0;k<n;k++){const a=A[k][p],b=A[k][q];A[k][p]=c*a-sn*b;A[k][q]=sn*a+c*b;}
+      for(let k=0;k<n;k++){const a=A[p][k],b=A[q][k];A[p][k]=c*a-sn*b;A[q][k]=sn*a+c*b;}
+      for(let k=0;k<n;k++){const a=V[k][p],b=V[k][q];V[k][p]=c*a-sn*b;V[k][q]=sn*a+c*b;}
+    }
+  }
+  return{val:A.map((r,i)=>r[i]),vec:V};
+}
+function svd3(H){                                        // 由 HᵀH 的特征分解得到 SVD
+  const{val,vec}=jacobi(mul3(tr3(H),H),3);
+  const idx=[0,1,2].sort((a,b)=>val[b]-val[a]);
+  const S=idx.map(k=>Math.sqrt(Math.max(val[k],0)));
+  const V=[0,1,2].map(r=>[0,1,2].map(c=>vec[r][idx[c]]));
+  const U=[[0,0,0],[0,0,0],[0,0,0]];
+  for(let c=0;c<3;c++){
+    let col=[0,1,2].map(r=>H[r][0]*V[0][c]+H[r][1]*V[1][c]+H[r][2]*V[2][c]);
+    if(S[c]>1e-9)col=col.map(v=>v/S[c]);
+    else col=norm(cross([0,1,2].map(r=>U[r][0]),[0,1,2].map(r=>U[r][1])));
+    for(let r=0;r<3;r++)U[r][c]=col[r];
+  }
+  return{U,S,V};
+}
+/* 正交 Procrustes：给定配对集合 D，求 W 使 Σ‖W·x − y‖² 最小，且 W 限定为旋转 */
+function procrustes(X,Y,D){
+  const H=[[0,0,0],[0,0,0],[0,0,0]];
+  if(!D.length)return{W:[[1,0,0],[0,1,0],[0,0,1]],M:H,S:[0,0,0]};
+  for(const[i,j]of D)for(let a=0;a<3;a++)for(let b=0;b<3;b++)H[a][b]+=X[i][a]*Y[j][b];
+  const{U,S,V}=svd3(H);
+  let W=mul3(V,tr3(U));
+  if(det3(W)<0){                                         // 剔除镜像解，保证是纯旋转
+    const V2=V.map(r=>[r[0],r[1],-r[2]]);
+    W=mul3(V2,tr3(U));
+  }
+  return{W,M:H,S};
+}
+
+/*═══════════════════════════════════════════════════════════════
+  1 · 构造「真实语义流形」：5 个语义簇，簇内带真实序结构
+═══════════════════════════════════════════════════════════════*/
+const CLUSTERS=[
+  {name:"数字",color:"#fbbf24",items:["one 一","two 二","three 三","four 四","five 五","six 六","seven 七","eight 八"]},
+  {name:"亲属",color:"#34d399",items:["father 父","mother 母","brother 兄","sister 姐","son 子","daughter 女","uncle 叔","grandma 祖母"]},
+  {name:"动物",color:"#60a5fa",items:["dog 狗","cat 猫","horse 马","bird 鸟","fish 鱼","wolf 狼","sheep 羊","bear 熊"]},
+  {name:"颜色",color:"#f472b6",items:["red 红","blue 蓝","green 绿","yellow 黄","black 黑","white 白","grey 灰","purple 紫"]},
+  {name:"动作",color:"#c084fc",items:["run 跑","walk 走","eat 吃","drink 喝","sleep 睡","speak 说","see 看","give 给"]}
+];
+const CENTERS=[[1,.35,.2],[-.25,1,.35],[.3,-.4,1],[-1,.15,.55],[.15,-1,-.45]].map(norm);
+const CONCEPTS=[];
+{
+  const r=rng(20260827);
+  CLUSTERS.forEach((cl,ci)=>{
+    const c=CENTERS[ci];
+    const t1=norm(cross(c,Math.abs(c[1])<.9?[0,1,0]:[1,0,0]));
+    const t2=norm(cross(c,t1));
+    cl.items.forEach((w,k)=>{
+      const a=(k/(cl.items.length-1)-.5)*1.55;            // 沿弧展开＝簇内序结构
+      const b=Math.sin(a*2.1)*.30;                        // 弯一下，让流形真的是曲的
+      const v=norm([c[0]+t1[0]*a*.62+t2[0]*b, c[1]+t1[1]*a*.62+t2[1]*b, c[2]+t1[2]*a*.62+t2[2]*b]);
+      const p=w.split(" ");
+      CONCEPTS.push({en:p[0],zh:p[1],ci,color:cl.color,
+        truth:norm([v[0]+gauss(r)*.012,v[1]+gauss(r)*.012,v[2]+gauss(r)*.012])});
+    });
+  });
+}
+const N=CONCEPTS.length;
+
+/* 两种语言 ＝ 真实流形的两份独立副本：独立噪声 + 独立随机旋转（B 侧可加扭曲） */
+function randRot(seed){
+  const r=rng(seed);
+  const ax=norm([gauss(r),gauss(r),gauss(r)]), ang=r()*Math.PI*2;
+  const x=ax[0],y=ax[1],z=ax[2],c=Math.cos(ang),s=Math.sin(ang),t=1-c;
+  return[[t*x*x+c,t*x*y-s*z,t*x*z+s*y],[t*x*y+s*z,t*y*y+c,t*y*z-s*x],[t*x*z-s*y,t*y*z+s*x,t*z*z+c]];
+}
+const R_A=randRot(101), R_B=randRot(777);
+let LANG_A=[],LANG_B=[];
+function buildLangs(noise,lam){
+  const ra=rng(4242),rb=rng(8686);
+  LANG_A=CONCEPTS.map(c=>norm(mv(R_A,[c.truth[0]+gauss(ra)*noise,c.truth[1]+gauss(ra)*noise,c.truth[2]+gauss(ra)*noise])));
+  LANG_B=CONCEPTS.map(c=>{
+    // λ：沿固定轴拉长空间。这不是旋转，所以正交映射原理上就修不好它
+    const v=[c.truth[0]*(1+lam*1.7), c.truth[1]*(1-lam*.55), c.truth[2]*(1+lam*.15)];
+    return norm(mv(R_B,[v[0]+gauss(rb)*noise,v[1]+gauss(rb)*noise,v[2]+gauss(rb)*noise]));
+  });
+}
+
+/*═══════════════════════════════════════════════════════════════
+  2 · 检索：最近邻 / CSLS / P@1
+═══════════════════════════════════════════════════════════════*/
+const K_CSLS=6;
+function simMatrix(X,Y){
+  const S=[];
+  for(let i=0;i<X.length;i++){const row=new Float64Array(Y.length);
+    for(let j=0;j<Y.length;j++)row[j]=dot(X[i],Y[j]);S.push(row);}
+  return S;
+}
+function meanTopK(arr,k){
+  const a=Array.from(arr).sort((x,y)=>y-x);let s=0;
+  const m=Math.min(k,a.length);for(let i=0;i<m;i++)s+=a[i];return s/m;
+}
+function retrieve(X,Y,useCSLS){
+  const S=simMatrix(X,Y);
+  let rT=null,rS=null;
+  if(useCSLS){
+    rT=X.map((_,i)=>meanTopK(S[i],K_CSLS));                      // 源点在目标空间的邻域密度
+    const cols=Y.map((_,j)=>X.map((_,i)=>S[i][j]));
+    rS=cols.map(col=>meanTopK(col,K_CSLS));                      // 目标点在源空间的邻域密度
+  }
+  const score=(i,j)=>useCSLS?2*S[i][j]-rT[i]-rS[j]:S[i][j];
+  const pred=[],hubCount=new Array(Y.length).fill(0),ranks=[];
+  let hit=0,hit5=0;
+  for(let i=0;i<X.length;i++){
+    const order=[];
+    for(let j=0;j<Y.length;j++)order.push([score(i,j),j]);
+    order.sort((a,b)=>b[0]-a[0]);
+    const bj=order[0][1];
+    pred.push(bj);hubCount[bj]++;
+    if(bj===i)hit++;
+    // 正确答案排在第几名 —— 比 P@1 的非对即错更能说明「差多远」
+    let rk=order.length;
+    for(let t=0;t<order.length;t++)if(order[t][1]===i){rk=t+1;break;}
+    ranks.push(rk);
+    if(rk<=5)hit5++;
+  }
+  const sorted=ranks.slice().sort((a,b)=>a-b);
+  return{pred,p1:hit/X.length,p5:hit5/X.length,hubCount,
+    medRank:sorted[Math.floor(sorted.length/2)]};
+}
+/* 互为最近邻：A→B 与 B→A 都指向对方才纳入新词典。自学习的关键筛选 */
+function mutualNN(X,Y,useCSLS){
+  const f=retrieve(X,Y,useCSLS), b=retrieve(Y,X,useCSLS), D=[];
+  for(let i=0;i<X.length;i++)if(b.pred[f.pred[i]]===i)D.push([i,f.pred[i]]);
+  return D;
+}
+
+/*═══════════════════════════════════════════════════════════════
+  3 · 状态与流水线
+═══════════════════════════════════════════════════════════════*/
+const P={noise:.04,lam:0,seed:4,csls:false};            // 第 7 步默认关着，让用户自己开开看
+let step=0, W=[[1,0,0],[0,1,0],[0,0,1]], Mmat=[[0,0,0],[0,0,0],[0,0,0]], SV=[0,0,0];
+let dict=[], ret=null, history=[], iterRound=0, cslsDelta=null;
+
+function seedDict(k){                                    // 跨簇均匀取种子，避免全挤在一个簇
+  const D=[];if(k<=0)return D;
+  if(k===1)return[[0,0]];
+  for(let t=0;t<k;t++){const i=Math.round(t*(N-1)/(k-1));D.push([i,i]);}
+  return D;
+}
+const mapped=()=>LANG_A.map(v=>norm(mv(W,v)));
+
+/* 零种子时的粗初始化：用各自协方差主轴配对。真实系统用对抗训练，这里用等价的几何近似 */
+function crudeInit(){
+  const cov=V=>{const H=[[0,0,0],[0,0,0],[0,0,0]];
+    for(const v of V)for(let a=0;a<3;a++)for(let b=0;b<3;b++)H[a][b]+=v[a]*v[b];return H;};
+  const ea=jacobi(cov(LANG_A),3), eb=jacobi(cov(LANG_B),3);
+  const ia=[0,1,2].sort((x,y)=>ea.val[y]-ea.val[x]), ib=[0,1,2].sort((x,y)=>eb.val[y]-eb.val[x]);
+  const A=[0,1,2].map(r=>[0,1,2].map(c=>ea.vec[r][ia[c]]));
+  const B=[0,1,2].map(r=>[0,1,2].map(c=>eb.vec[r][ib[c]]));
+  // 主轴的方向有正负歧义：+v 和 −v 是同一个特征向量。必须把 4 种符号组合都试一遍，
+  // 挑「互为最近邻对数最多」的那个。漏掉这一步会收敛到镜像错解，P@1 直接归零。
+  const SIGNS=[[1,1,1],[1,-1,-1],[-1,1,-1],[-1,-1,1]];
+  let best=null;
+  for(const s of SIGNS){
+    const Bs=[0,1,2].map(r=>[B[r][0]*s[0],B[r][1]*s[1],B[r][2]*s[2]]);
+    const W0=mul3(Bs,tr3(A));
+    if(det3(W0)<0)continue;                              // 只要旋转，不要镜像
+    const X0=LANG_A.map(v=>norm(mv(W0,v)));
+    const D=mutualNN(X0,LANG_B,true);
+    let sc=0;for(const d of D)sc+=dot(X0[d[0]],LANG_B[d[1]]);
+    const key=D.length*100+sc;
+    if(!best||key>best.key)best={key,D};
+  }
+  return best&&best.D.length>=3?best.D:seedDict(4);
+}
+
+function recompute(){
+  buildLangs(P.noise,P.lam);
+  if(step<3){                                            // 尚未求 W
+    W=[[1,0,0],[0,1,0],[0,0,1]];Mmat=[[0,0,0],[0,0,0],[0,0,0]];SV=[0,0,0];
+    dict=step>=2?seedDict(P.seed):[];
+    ret=null;history=[];
+    return;
+  }
+  dict=P.seed>0?seedDict(P.seed):crudeInit();
+  let r=procrustes(LANG_A,LANG_B,dict);
+  W=r.W;Mmat=r.M;SV=r.S;
+  // 第 7 步之前一律用朴素最近邻，保证 HUD 数字和迭代曲线量的是同一个东西
+  const useC=step>=6?P.csls:false;
+  if(step>=5){                                           // 自学习：迭代扩充词典
+    history=[];
+    for(let it=0;it<=iterRound;it++){
+      const X=mapped();
+      history.push({it,size:dict.length,p1:retrieve(X,LANG_B,useC).p1});
+      if(it===iterRound)break;
+      const nd=mutualNN(X,LANG_B,true);                  // 筛词典时固定用 CSLS，让开关只影响最终检索
+      if(nd.length>=3)dict=nd;
+      const r2=procrustes(LANG_A,LANG_B,dict);
+      W=r2.W;Mmat=r2.M;SV=r2.S;
+    }
+  }else history=[];
+  const Xf=mapped();
+  ret=retrieve(Xf,LANG_B,useC);
+  cslsDelta=step>=6?retrieve(Xf,LANG_B,true).p1-retrieve(Xf,LANG_B,false).p1:null;
+}
+
+/*═══════════════════════════════════════════════════════════════
+  4 · 七步文案
+═══════════════════════════════════════════════════════════════*/
+const STEPS=[
+{t:"两个互不相识的空间",
+ d:`语言 A 和语言 B <b>各自独立</b>训练出词向量，谁也没见过谁。两团点云的<b>形状</b>其实一样——因为世界是同一个，「三」和「四」的距离在哪种语言里都差不多。<br>但它们的<b>朝向是任意的</b>：每次训练随机初始化，坐标轴本身毫无意义。<b style="color:var(--warn)">你不知道哪个点对应哪个点，这就是全部难题。</b>`},
+{t:"中心化，然后归一化",
+ d:`先把两团都挪到原点、缩到单位球面上（画出的三道细圈就是这个球）。这一步扔掉了<code>平移</code>和<code>缩放</code>两个自由度——它们本来就不携带语义。<br>剩下唯一没解决的，只有<b style="color:var(--acc)">旋转</b>。问题一下子小了很多。`},
+{t:"种子词典：给几个已知的对应",
+ d:`假设你已经认出 <b>k</b> 对词（右侧滑块可调）。破译现场这可能来自双语碑文、人名地名、或者数词。<br>白线连着的就是种子对。<b>k 可以调到 0</b>——那就是完全无监督，第 6 步讲它怎么自己长出词典。`},
+{t:"SVD 求最优旋转 ★",
+ d:`核心一步。把种子对堆成互协方差矩阵 <code>M = XᵀY</code>，对它做 SVD 得 <code>M = UΣVᵀ</code>，答案就是 <code>W = VUᵀ</code>。<br><b>丢掉 Σ 只留 U 和 V</b>，等于强制这个映射是纯旋转、不许拉伸——因为拉伸会破坏原空间里的距离关系。<br>它有<b style="color:var(--ok)">闭式解</b>，一步到位，不迭代不调参。看左边：A 转过去了。`},
+{t:"检索：每个点找最近的邻居",
+ d:`W 已经把 A 转进 B 的坐标系。现在对 A 的每个点，在 B 里找余弦相似度最高的那个，当作翻译。<br><b style="color:var(--ok)">绿线＝猜对</b>，<b style="color:var(--bad)">红线＝猜错</b>。正确率就是 <code>P@1</code>。<br>注意：<b>只用了 k 个种子，却翻译出了全部 40 个词</b>。这就是流形对齐的威力——结构本身在告诉你答案。`},
+{t:"自学习：让词典自己长大",
+ d:`把这一轮里<b>互为最近邻</b>的点对（A 认 B，B 也认 A）当成新词典，重新求 W，再检索，再更新。<br>点左上的<b>「再迭代一轮」</b>，看右侧曲线往上爬：默认 4 对种子会自举到 23 对，P@1 从 75% 升到 82.5%。<br>再把 k 拉到 <b>0</b> 试试——完全无监督，靠主轴粗对齐起步，最后<b style="color:var(--ok)">同样收敛到 82.5%</b>。种子词典其实并非必需品。`},
+{t:"CSLS：一个只在特定条件下才有用的补丁",
+ d:`有个病叫<b style="color:var(--warn)">枢纽（hubness）</b>——少数点是几乎所有点的最近邻，吞掉大量错误配对。<b>CSLS</b> 的修法是：谁本来就人缘好，检索时就给谁<b>扣分</b>。<br>
+ 它的效果<b>完全取决于你的数据有没有这个病</b>。左上开关切一下，再拖噪声/λ 滑块，实测净增益如下：<br>
+ <span class="mono" style="font-size:11px;color:var(--dim)">σ=0.04 干净 <b style="color:var(--bad)">−20</b>　σ=0.08 <b>±0</b>　σ=0.12 <b style="color:var(--ok)">+2.5</b>　σ=0.20 <b style="color:var(--ok)">+5</b>　λ=0.5 <b style="color:var(--ok)">+10</b></span><br>
+ <b>数据干净时它是负担，数据一乱它才回本。</b>照搬论文里的技巧之前，先量一下自己的数据到底有没有那个病。`}
+];
+
+/*═══════════════════════════════════════════════════════════════
+  5 · 渲染
+═══════════════════════════════════════════════════════════════*/
+const cv=document.getElementById("cv"),ctx=cv.getContext("2d"),stage=document.getElementById("stage");
+let Wd=0,Hd=0;
+function resize(){const d=Math.min(devicePixelRatio||1,2);Wd=stage.clientWidth;Hd=stage.clientHeight;
+  cv.width=Wd*d;cv.height=Hd*d;ctx.setTransform(d,0,0,d,0,0);}
+new ResizeObserver(resize).observe(stage);
+
+const cam={yaw:.5,pitch:-.25,dist:11.5,fov:660};
+function proj(p){
+  const cy=Math.cos(cam.yaw),sy=Math.sin(cam.yaw),cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+  const x=p[0]*cy-p[2]*sy;let z=p[0]*sy+p[2]*cy;
+  const y=p[1]*cp-z*sp;z=p[1]*sp+z*cp;
+  const d=z+cam.dist;if(d<.6)return null;
+  const k=cam.fov/d;return{x:Wd/2+x*k,y:Hd/2-y*k,z:d,k};
+}
+const SC=2.6, SPLIT=3.35;
+let dispA=[],dispB=[],hover=-1,screenPts=[];
+function targets(){
+  const sp=step<3?SPLIT:0;
+  const src=step<3?LANG_A:mapped();
+  return[src.map(v=>[v[0]*SC-sp,v[1]*SC,v[2]*SC]),
+         LANG_B.map(v=>[v[0]*SC+sp,v[1]*SC,v[2]*SC])];
+}
+function drawSphere(cx){
+  ctx.strokeStyle="rgba(70,95,135,.16)";ctx.lineWidth=1;
+  for(let ring=0;ring<3;ring++){
+    ctx.beginPath();let started=false;
+    for(let t=0;t<=72;t++){
+      const th=t/72*Math.PI*2,ct=Math.cos(th),st=Math.sin(th);
+      const v=ring===0?[ct,st,0]:ring===1?[ct,0,st]:[0,ct,st];
+      const p=proj([cx+v[0]*SC,v[1]*SC,v[2]*SC]);
+      if(!p){started=false;continue;}
+      started?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);started=true;
+    }
+    ctx.stroke();
+  }
+}
+function draw(){
+  const tg=targets(),tA=tg[0],tB=tg[1];
+  if(dispA.length!==N){dispA=tA.map(p=>p.slice());dispB=tB.map(p=>p.slice());}
+  for(let i=0;i<N;i++)for(let a=0;a<3;a++){
+    dispA[i][a]+=(tA[i][a]-dispA[i][a])*.11;
+    dispB[i][a]+=(tB[i][a]-dispB[i][a])*.11;
+  }
+  ctx.clearRect(0,0,Wd,Hd);
+  if(step>=1){ if(step<3){drawSphere(-SPLIT);drawSphere(SPLIT);} else drawSphere(0); }
+
+  const pA=dispA.map(proj),pB=dispB.map(proj);
+
+  // 簇内骨架：把流形结构本身画出来
+  ctx.lineWidth=1;
+  for(let i=0;i<N-1;i++){
+    if(CONCEPTS[i].ci!==CONCEPTS[i+1].ci)continue;
+    ctx.strokeStyle=CONCEPTS[i].color+"4d";
+    for(const pp of[pA,pB]){
+      const a=pp[i],b=pp[i+1];if(!a||!b)continue;
+      ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+    }
+  }
+  // 种子词典
+  if(step===2||step===3){
+    ctx.strokeStyle="rgba(255,255,255,.5)";ctx.lineWidth=1.4;
+    for(const d of dict){const a=pA[d[0]],b=pB[d[1]];if(!a||!b)continue;
+      ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();}
+  }
+  // 检索结果
+  if(step>=4&&ret){
+    for(let i=0;i<N;i++){
+      const j=ret.pred[i],a=pA[i],b=pB[j];if(!a||!b)continue;
+      const ok=j===i;
+      ctx.strokeStyle=ok?"rgba(52,211,153,.42)":"rgba(251,113,133,.78)";
+      ctx.lineWidth=ok?1:1.7;
+      ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+    }
+  }
+  // 节点
+  screenPts=[];
+  const nodes=[];
+  for(let i=0;i<N;i++){if(pA[i])nodes.push({i,p:pA[i],L:"A"});if(pB[i])nodes.push({i,p:pB[i],L:"B"});}
+  nodes.sort((a,b)=>b.p.z-a.p.z);
+  for(const nd of nodes){
+    const c=CONCEPTS[nd.i],p=nd.p,r=Math.max(2.4,4.4*11.5/p.z),hot=hover===nd.i;
+    screenPts.push({i:nd.i,x:p.x,y:p.y});
+    ctx.globalAlpha=hot?1:.92;
+    ctx.beginPath();ctx.arc(p.x,p.y,r*(hot?1.6:1),0,7);
+    if(nd.L==="A"){ctx.fillStyle=c.color;ctx.fill();}
+    else{ctx.strokeStyle=c.color;ctx.lineWidth=1.8;ctx.stroke();}
+    ctx.globalAlpha=1;
+    if(step>=6&&nd.L==="B"&&ret&&ret.hubCount[nd.i]>=3){
+      ctx.beginPath();ctx.arc(p.x,p.y,r*2.6,0,7);
+      ctx.strokeStyle="rgba(251,191,36,.85)";ctx.lineWidth=1.3;ctx.stroke();
+    }
+    if(hot){ctx.beginPath();ctx.arc(p.x,p.y,r*2.2,0,7);ctx.strokeStyle="#fff";ctx.lineWidth=1.2;ctx.stroke();}
+  }
+  // 悬停标签
+  ctx.font='600 11px -apple-system,"PingFang SC",sans-serif';
+  for(const nd of nodes){
+    if(hover!==nd.i)continue;
+    const c=CONCEPTS[nd.i],txt=c.en+" "+c.zh,w=ctx.measureText(txt).width;
+    ctx.fillStyle="rgba(7,11,18,.9)";ctx.fillRect(nd.p.x+8,nd.p.y-15,w+9,16);
+    ctx.fillStyle=c.color;ctx.fillText(txt,nd.p.x+12,nd.p.y-3);
+  }
+  // 空间标注
+  if(step<3){
+    ctx.font='600 12px -apple-system,"PingFang SC",sans-serif';ctx.textAlign="center";
+    const la=proj([-SPLIT,-SC-.85,0]),lb=proj([SPLIT,-SC-.85,0]);
+    ctx.fillStyle="rgba(203,213,225,.9)";               // 中性色：这里说的是语言，不是语义簇
+    if(la)ctx.fillText("语言 A 的空间（实心）",la.x,la.y);
+    if(lb)ctx.fillText("语言 B 的空间（空心）",lb.x,lb.y);
+    ctx.textAlign="left";
+  }
+  requestAnimationFrame(draw);
+}
+
+/*═══════════════════════════════════════════════════════════════
+  6 · UI
+═══════════════════════════════════════════════════════════════*/
+const $=id=>document.getElementById(id);
+function fmtMat(el,Mx,scale){
+  el.innerHTML=[0,1,2].map(r=>[0,1,2].map(c=>{
+    const v=Mx[r][c]/(scale||1);
+    const cls=Math.abs(v)<.05?"z":v>0?"p":"n";
+    return '<i class="'+cls+'">'+(v>=0?"+":"−")+Math.abs(v).toFixed(2)+"</i>";
+  }).join("")).join("");
+}
+function renderSide(){
+  const flat=[];for(const r of Mmat)for(const v of r)flat.push(Math.abs(v));
+  fmtMat($("matM"),Mmat,Math.max(Math.max.apply(null,flat),1e-9));
+  fmtMat($("matW"),W,1);
+  $("sv").textContent=SV.map(s=>s.toFixed(2)).join("  ");
+  const d=det3(W);
+  $("dw").textContent=d.toFixed(4);
+  $("dw").style.color=Math.abs(d-1)<.01?"var(--ok)":"var(--bad)";
+
+  if(history.length){
+    const w=300,ht=64,mx=Math.max(Math.max.apply(null,history.map(x=>x.p1)),.2);
+    const X=k=>8+k*(w-16)/Math.max(history.length-1,1);
+    const Y=v=>ht-6-(v/mx)*(ht-16);
+    $("chart").innerHTML='<svg viewBox="0 0 '+w+' '+ht+'" style="width:100%;height:'+ht+'px;display:block">'+
+      '<line x1="8" y1="'+(ht-6)+'" x2="'+(w-8)+'" y2="'+(ht-6)+'" stroke="#1e293b"/>'+
+      '<polyline points="'+history.map((x,k)=>X(k)+","+Y(x.p1)).join(" ")+'" fill="none" stroke="#a78bfa" stroke-width="2"/>'+
+      history.map((x,k)=>'<circle cx="'+X(k)+'" cy="'+Y(x.p1)+'" r="2.6" fill="#c4b5fd"/>').join("")+'</svg>';
+    $("iterTbl").innerHTML='<tr><td style="color:var(--dim2)">轮次</td><td style="color:var(--dim2)">词典大小</td><td style="color:var(--dim2)">P@1</td></tr>'+
+      history.map(x=>'<tr><td>#'+x.it+'</td><td>'+x.size+'</td><td style="color:'+
+        (x.p1>.6?"var(--ok)":x.p1>.3?"var(--warn)":"var(--bad)")+'">'+(x.p1*100).toFixed(1)+'%</td></tr>').join("");
+  }else{
+    $("chart").innerHTML='<div class="note" style="padding:14px 0;text-align:center">走到第 6 步开始迭代</div>';
+    $("iterTbl").innerHTML="";
+  }
+}
+function renderHUD(){
+  const p1=ret?ret.p1:0;
+  const hubs=ret?ret.hubCount.filter(c=>c>=3).length:0;
+  const col=p1>=.7?"var(--ok)":p1>=.35?"var(--warn)":"var(--bad)";
+  $("hud").innerHTML=
+    '<div class="m"><span class="k">步骤</span><span class="v" style="color:var(--acc);font-size:15px">'+(step+1)+' / 7</span><span class="n">'+STEPS[step].t+'</span></div>'+
+    '<div class="m"><span class="k">词典大小</span><span class="v">'+dict.length+'</span><span class="n">共 '+N+' 个概念</span></div>'+
+    '<div class="m"><span class="k">P@1　第一个猜测就对</span><span class="v" style="color:'+col+'">'+(step>=4?(p1*100).toFixed(1)+"%":"—")+'</span>'+
+      '<span class="n">瞎猜只有 '+(100/N).toFixed(1)+'% ＝ 高出 '+(step>=4?(p1*N).toFixed(0):"—")+' 倍</span></div>'+
+    '<div class="m"><span class="k">P@5　答案在前五名内</span><span class="v" style="color:var(--ok)">'+(step>=4&&ret?(ret.p5*100).toFixed(1)+"%":"—")+'</span>'+
+      '<span class="n">正确答案中位排名 第 '+(step>=4&&ret?ret.medRank:"—")+' 名</span></div>'+
+    '<div class="m"><span class="k">枢纽点数</span><span class="v" style="color:'+(hubs>3?"var(--warn)":"var(--dim)")+'">'+(step>=4?hubs:"—")+'</span><span class="n">被 ≥3 个点认作最近邻</span></div>'+
+    (step>=6?'<div class="m"><span class="k">CSLS 净增益</span><span class="v" style="color:'+
+      (cslsDelta>0.001?"var(--ok)":cslsDelta<-0.001?"var(--bad)":"var(--dim)")+'">'+
+      (cslsDelta===null?"—":(cslsDelta>=0?"+":"−")+Math.abs(cslsDelta*100).toFixed(1))+'</span>'+
+      '<span class="n">开减关，单位百分点</span></div>':"")+
+    (step>=5?'<div class="m" style="display:flex;align-items:center;gap:7px">'+
+      '<button id="iter">再迭代一轮</button>'+
+      // 用勾选框而不是「开/关」二字：后者会被读成「点它就关」，方向刚好相反
+      (step>=6?'<button id="cslsB" class="'+(P.csls?"on":"")+'">'+(P.csls?"☑ CSLS 已启用":"☐ CSLS 未启用")+'</button>':"")+'</div>':"");
+  if($("iter"))$("iter").onclick=()=>{iterRound++;recompute();renderAll();};
+  if($("cslsB"))$("cslsB").onclick=()=>{P.csls=!P.csls;recompute();renderAll();};
+}
+function renderNarr(){
+  $("narr").innerHTML='<div class="num">'+String(step+1).padStart(2,"0")+'</div>'+
+    '<div><h3>'+STEPS[step].t+'</h3><p>'+STEPS[step].d+'</p></div>';
+  $("steps").innerHTML=STEPS.map((_,i)=>'<b class="'+(i<step?"done":i===step?"cur":"")+'" data-s="'+i+'"></b>').join("");
+  $("steps").querySelectorAll("b").forEach(b=>{b.onclick=()=>goto(+b.dataset.s);});
+  $("prev").disabled=step===0;$("next").disabled=step===STEPS.length-1;
+}
+function renderAll(){renderHUD();renderNarr();renderSide();}
+function goto(s){
+  step=Math.max(0,Math.min(STEPS.length-1,s));
+  if(step>=5&&iterRound===0)iterRound=1;
+  if(step<5)iterRound=0;
+  recompute();renderAll();
+}
+$("prev").onclick=()=>goto(step-1);
+$("next").onclick=()=>goto(step+1);
+$("rst").onclick=()=>{cam.yaw=.5;cam.pitch=-.25;cam.dist=11.5;};
+let playing=null;
+$("play").onclick=()=>{
+  if(playing){clearInterval(playing);playing=null;$("play").textContent="▶ 自动播放";return;}
+  $("play").textContent="⏸ 暂停";
+  playing=setInterval(()=>{
+    if(step>=STEPS.length-1){clearInterval(playing);playing=null;$("play").textContent="▶ 自动播放";return;}
+    goto(step+1);
+  },4600);
+};
+function bindSlider(id,valId,set,fmt){
+  const el=$(id);
+  el.oninput=()=>{set(+el.value);$(valId).textContent=fmt();recompute();renderAll();};
+}
+bindSlider("sLam","vLam",v=>P.lam=v/100*1.2,()=>P.lam.toFixed(2));
+bindSlider("sNoi","vNoi",v=>P.noise=v/100,()=>P.noise.toFixed(2));
+bindSlider("sSeed","vSeed",v=>P.seed=v,()=>String(P.seed));
+
+let drag=null;
+const onPanel=e=>!!(e.target&&e.target.closest&&e.target.closest(".float"));
+stage.addEventListener("pointerdown",e=>{
+  if(onPanel(e))return;                                  // 面板上的按钮/开关，别抢它的点击
+  drag={x:e.clientX,y:e.clientY};stage.setPointerCapture(e.pointerId);
+});
+stage.addEventListener("pointerup",()=>{drag=null;});
+stage.addEventListener("pointermove",e=>{
+  if(!drag&&onPanel(e)){hover=-1;return;}
+  if(drag){
+    cam.yaw+=(e.clientX-drag.x)*.007;
+    cam.pitch=Math.max(-1.35,Math.min(1.35,cam.pitch+(e.clientY-drag.y)*.006));
+    drag={x:e.clientX,y:e.clientY};hover=-1;return;
+  }
+  const r=stage.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+  let best=-1,bd=225;
+  for(const s of screenPts){const d=(s.x-mx)*(s.x-mx)+(s.y-my)*(s.y-my);if(d<bd){bd=d;best=s.i;}}
+  hover=best;
+});
+stage.addEventListener("wheel",e=>{e.preventDefault();
+  cam.dist=Math.max(5.5,Math.min(26,cam.dist+e.deltaY*.012));},{passive:false});
+
+// 簇色图例直接由数据生成，保证和画布上用的是同一批色值
+$("clusterLgd").innerHTML=CLUSTERS.map(c=>
+  '<span class="it"><i class="sw c" style="background:'+c.color+'"></i>'+c.name+'</span>').join("");
+
+// 支持用 URL 片段直接定位，便于分享和截图：
+//   #step=5            跳到第 5 步
+//   #step=6&k=0        第 6 步且零种子（完全无监督）
+//   #step=7&csls=1     第 7 步且开启 CSLS
+//   还可附带 noise / lam / yaw / pitch
+(function fromHash(){
+  const h=location.hash.replace(/^#/,"");if(!h)return;
+  const q={};h.split("&").forEach(kv=>{const p=kv.split("=");if(p.length===2)q[p[0]]=decodeURIComponent(p[1]);});
+  if(q.k!==undefined){P.seed=Math.max(0,Math.min(N,+q.k));$("sSeed").value=P.seed;$("vSeed").textContent=String(P.seed);}
+  if(q.noise!==undefined){P.noise=+q.noise;$("sNoi").value=Math.round(P.noise*100);$("vNoi").textContent=P.noise.toFixed(2);}
+  if(q.lam!==undefined){P.lam=+q.lam;$("sLam").value=Math.round(P.lam/1.2*100);$("vLam").textContent=P.lam.toFixed(2);}
+  if(q.csls!==undefined)P.csls=(q.csls==="1"||q.csls==="true");
+  if(q.yaw!==undefined)cam.yaw=+q.yaw;
+  if(q.pitch!==undefined)cam.pitch=+q.pitch;
+  if(q.step!==undefined)step=Math.max(0,Math.min(STEPS.length-1,+q.step-1));
+  if(step>=5)iterRound=6;
+})();
+
+resize();recompute();renderAll();draw();
+
+/*═══════════════════════════════════════════════════════════════
+  7 · 控制台自检：零噪声零扭曲时算法必须完美复原
+═══════════════════════════════════════════════════════════════*/
+console.log("%c流形对齐实验室 · 自检","color:#a78bfa;font-weight:bold;font-size:13px");
+(function selftest(){
+  const save={noise:P.noise,lam:P.lam};
+  buildLangs(0,0);
+  const full=CONCEPTS.map((_,i)=>[i,i]);
+  const r=procrustes(LANG_A,LANG_B,full);
+  const X=LANG_A.map(v=>norm(mv(r.W,v)));
+  let err=0;
+  for(let i=0;i<N;i++)err=Math.max(err,Math.hypot(X[i][0]-LANG_B[i][0],X[i][1]-LANG_B[i][1],X[i][2]-LANG_B[i][2]));
+  const rr=retrieve(X,LANG_B,false);
+  console.log("  最大逐点复原误差 =",err.toExponential(2),err<1e-6?"✓":"✗ 有问题");
+  console.log("  P@1 =",(rr.p1*100).toFixed(1)+"%",rr.p1===1?"✓":"✗ 有问题");
+  console.log("  det(W) =",det3(r.W).toFixed(6),Math.abs(det3(r.W)-1)<1e-6?"✓ 是纯旋转":"✗ 有问题");
+  console.log("  说明：两团点云只差一个旋转时，Procrustes 应当把它完全还原。");
+  buildLangs(save.noise,save.lam);
+})();
+</script>
+</body>
+</html>
