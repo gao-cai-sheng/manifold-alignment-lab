@@ -5,7 +5,9 @@
 > An interactive, dependency-free visualization of unsupervised bilingual lexicon induction:
 > orthogonal Procrustes, SVD, self-learning, and CSLS — all computed live in the browser.
 
-单文件、零依赖、断网可用。双击 `index.html` 就能跑。
+**▶ [在线体验](https://gao-cai-sheng.github.io/manifold-alignment-lab/)**
+
+单文件、零依赖、断网可用。双击 `index.html` 也能跑。
 
 ![SVD 求最优旋转](docs/02-svd-rotation.png)
 
